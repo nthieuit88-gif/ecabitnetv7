@@ -50,7 +50,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onSelectUser })
         // Handle "Email logins are disabled" (Offline Mode Fallback)
         if (authError.message.includes("Email logins are disabled") || authError.message.includes("disabled")) {
              console.warn("Supabase Auth disabled/restricted. Switching to Local Bypass Mode.");
-             // In local mode, we can't enforce single device logic via DB, so just let them in
+             // In local mode, just proceed
              onSelectUser(user); 
              return;
         }
@@ -98,11 +98,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onSelectUser })
         }
       }
 
-      // 2. Login Success: Update Session ID in Database to enforce single device
+      // 2. Login Success: CRITICAL STEP for Single Device
       const newSessionId = generateSessionId();
       
+      // Save to LocalStorage immediately - this marks "THIS" browser as the owner of the session
+      localStorage.setItem('ecabinet_session_id', newSessionId);
+      
       try {
-          // Update the user record with the new session ID
+          // Update the user record with the new session ID in DB
           await supabase.from('users').update({ 
               current_session_id: newSessionId,
               status: 'active' 

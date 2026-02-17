@@ -52,11 +52,57 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // --- SINGLE DEVICE LOGIN ENFORCEMENT ---
-  useEffect(() => {
-    if (!currentUser || !currentUser.email) return;
+  // --- SESSION CHECK LOGIC (THE "Hybrid Check") ---
+  const checkSessionValidity = async () => {
+      // 1. If not logged in or already kicked out, do nothing
+      if (!currentUser || showKickedOutModal) return;
 
-    // This channel listens for updates to the user's record in the DB
+      // 2. Get "My" Session ID from LocalStorage
+      const localSessionId = localStorage.getItem('ecabinet_session_id');
+      
+      // If I'm logged in but have no local session ID (edge case), create one or logout.
+      // Here we choose to be strict: No ID -> Invalid.
+      if (!localSessionId) {
+          return; 
+      }
+
+      // 3. Fetch "Real" Session ID from Database (Single Source of Truth)
+      const { data: userOnDb, error } = await supabase
+          .from('users')
+          .select('current_session_id')
+          .eq('id', currentUser.id)
+          .single();
+
+      if (error || !userOnDb) {
+          // If DB read fails (offline), we assume session is valid to prevent accidental lockout
+          return;
+      }
+
+      // 4. COMPARE
+      // If DB says session is X, but I am session Y -> I am stale -> Kick me out
+      if (userOnDb.current_session_id && userOnDb.current_session_id !== localSessionId) {
+          console.warn(`Session mismatch! Local: ${localSessionId} vs DB: ${userOnDb.current_session_id}`);
+          handleLogout(false); // Local logout
+          setShowKickedOutModal(true);
+      }
+  };
+
+  // --- ACTIVATE SESSION GUARD ---
+  useEffect(() => {
+    if (!currentUser) return;
+
+    // 1. Check immediately on mount/login
+    checkSessionValidity();
+
+    // 2. Check periodically (every 10 seconds) - "Heartbeat"
+    const intervalId = setInterval(checkSessionValidity, 10000);
+
+    // 3. Check when window gains focus (User comes back to tab)
+    const onFocus = () => checkSessionValidity();
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('visibilitychange', onFocus);
+
+    // 4. Realtime Listener (Instant Reaction)
     const sessionChannel = supabase
       .channel(`session_guard_${currentUser.id}`)
       .on(
@@ -65,30 +111,22 @@ const App: React.FC = () => {
           event: 'UPDATE',
           schema: 'public',
           table: 'users',
-          filter: `email=eq.${currentUser.email}`,
+          filter: `id=eq.${currentUser.id}`, // Listen specifically for MY user ID updates
         },
         (payload) => {
-          const newUser = payload.new as User;
-          
-          // Check if the session ID in DB is different from what we have locally
-          // AND we have a local session ID set (to avoid kicking out on initial load before sync)
-          if (
-            currentUser.current_session_id && 
-            newUser.current_session_id && 
-            newUser.current_session_id !== currentUser.current_session_id
-          ) {
-            console.warn("Duplicate login detected. Logging out this device.");
-            handleLogout(false); // Logout locally
-            setShowKickedOutModal(true); // Show alert
-          }
+          // When an update happens, trigger the validity check logic
+          checkSessionValidity();
         }
       )
       .subscribe();
 
     return () => {
+      clearInterval(intervalId);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('visibilitychange', onFocus);
       supabase.removeChannel(sessionChannel);
     };
-  }, [currentUser]);
+  }, [currentUser, showKickedOutModal]); // Dependency on showKickedOutModal ensures we stop checking if already kicked
 
   // --- SUPABASE AUTH LISTENER ---
   useEffect(() => {
@@ -104,6 +142,8 @@ const App: React.FC = () => {
          
          if (userProfile) {
            setCurrentUser(userProfile);
+           // Restore local session ID if missing in LS but present in DB (only on initial load logic if needed)
+           // But actually, we want strict enforcement. If LS is missing, they should re-login.
          } else if (session.user.email) {
            setCurrentUser({
              id: session.user.id,
@@ -147,6 +187,7 @@ const App: React.FC = () => {
             setCurrentUser(null);
             setActiveTab('dashboard');
             localStorage.setItem('ecabinet_activeTab', 'dashboard');
+            localStorage.removeItem('ecabinet_session_id'); // Clear session token
         }
       }
     });
@@ -249,25 +290,43 @@ const App: React.FC = () => {
     if (triggerSignOut) await supabase.auth.signOut();
     setCurrentUser(null);
     setActiveTab('dashboard');
+    localStorage.removeItem('ecabinet_session_id'); // Clear session on manual logout
   };
 
   // SYSTEM RESTORE
   const handleSystemRestore = async (data: { users: User[], rooms: Room[], meetings: Meeting[], documents: Document[] }) => {
-     // 1. Update Local State Immediately
-     if (data.users && data.users.length > 0) setUsers(data.users);
-     if (data.rooms && data.rooms.length > 0) setRooms(data.rooms);
-     if (data.meetings && data.meetings.length > 0) setMeetings(data.meetings);
-     if (data.documents && data.documents.length > 0) setDocuments(data.documents);
-
-     // 2. Attempt to Persist to Supabase (Upsert to prevent duplicates)
      try {
-        if (data.users.length > 0) await supabase.from('users').upsert(data.users);
-        if (data.rooms.length > 0) await supabase.from('rooms').upsert(data.rooms);
-        if (data.meetings.length > 0) await supabase.from('meetings').upsert(data.meetings);
-        if (data.documents.length > 0) await supabase.from('documents').upsert(data.documents);
-        console.log("System restore synced to Supabase successfully.");
+        console.log("Starting system restore...", data);
+
+        // 1. Update Local State Immediately (Offline First)
+        if (data.users && Array.isArray(data.users)) setUsers(data.users);
+        if (data.rooms && Array.isArray(data.rooms)) setRooms(data.rooms);
+        if (data.meetings && Array.isArray(data.meetings)) setMeetings(data.meetings);
+        if (data.documents && Array.isArray(data.documents)) setDocuments(data.documents);
+
+        // 2. Attempt to Persist to Supabase (Best Effort)
+        // We use individual try/catch blocks so one failure doesn't stop the whole process
+        
+        const upsertTable = async (table: string, records: any[]) => {
+            if (!records || records.length === 0) return;
+            const { error } = await supabase.from(table).upsert(records);
+            if (error) {
+                console.warn(`[Restore] Sync failed for ${table}:`, error.message);
+                // We do NOT re-throw here to allow other tables to proceed
+            } else {
+                console.log(`[Restore] Synced ${table} successfully.`);
+            }
+        };
+
+        // Order matters for Foreign Keys: Users -> Rooms/Docs -> Meetings
+        await upsertTable('users', data.users);
+        await upsertTable('rooms', data.rooms);
+        await upsertTable('documents', data.documents);
+        await upsertTable('meetings', data.meetings);
+
      } catch (e) {
-        console.error("Error syncing restore to Supabase:", e);
+        console.error("Critical error during system restore:", e);
+        throw e; // This will be caught by SystemSettings to show error toast
      }
   };
 
