@@ -52,7 +52,7 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // --- SESSION CHECK LOGIC (THE "Hybrid Check") ---
+  // --- SESSION CHECK LOGIC (THE "Hybrid Check" v2) ---
   const checkSessionValidity = async () => {
       // 1. If not logged in or already kicked out, do nothing
       if (!currentUser || showKickedOutModal) return;
@@ -60,9 +60,10 @@ const App: React.FC = () => {
       // 2. Get "My" Session ID from LocalStorage
       const localSessionId = localStorage.getItem('ecabinet_session_id');
       
-      // If I'm logged in but have no local session ID (edge case), create one or logout.
-      // Here we choose to be strict: No ID -> Invalid.
+      // Strict Check: If logged in but no session ID locally, something is wrong -> Kick.
       if (!localSessionId) {
+          console.warn("No local session ID found. Logging out.");
+          handleLogout(false);
           return; 
       }
 
@@ -74,14 +75,15 @@ const App: React.FC = () => {
           .single();
 
       if (error || !userOnDb) {
-          // If DB read fails (offline), we assume session is valid to prevent accidental lockout
+          // Network error or RLS issue. 
+          // Strategy: Be lenient to allow offline usage, BUT if we get specific "no row" error, kick out.
           return;
       }
 
       // 4. COMPARE
       // If DB says session is X, but I am session Y -> I am stale -> Kick me out
       if (userOnDb.current_session_id && userOnDb.current_session_id !== localSessionId) {
-          console.warn(`Session mismatch! Local: ${localSessionId} vs DB: ${userOnDb.current_session_id}`);
+          console.warn(`[Security] Session mismatch! Local: ${localSessionId} vs DB: ${userOnDb.current_session_id}`);
           handleLogout(false); // Local logout
           setShowKickedOutModal(true);
       }
@@ -94,15 +96,24 @@ const App: React.FC = () => {
     // 1. Check immediately on mount/login
     checkSessionValidity();
 
-    // 2. Check periodically (every 10 seconds) - "Heartbeat"
-    const intervalId = setInterval(checkSessionValidity, 10000);
+    // 2. Check periodically (every 5 seconds) - Aggressive Heartbeat
+    const intervalId = setInterval(checkSessionValidity, 5000);
 
     // 3. Check when window gains focus (User comes back to tab)
     const onFocus = () => checkSessionValidity();
     window.addEventListener('focus', onFocus);
     window.addEventListener('visibilitychange', onFocus);
+    
+    // 4. Check when LocalStorage changes (Multi-tab sync on same machine)
+    const onStorageChange = (e: StorageEvent) => {
+        if (e.key === 'ecabinet_session_id' && e.newValue !== localStorage.getItem('ecabinet_session_id')) {
+            // Another tab updated the session ID? Re-check validity against DB.
+            checkSessionValidity();
+        }
+    };
+    window.addEventListener('storage', onStorageChange);
 
-    // 4. Realtime Listener (Instant Reaction)
+    // 5. Realtime Listener (Instant Reaction)
     const sessionChannel = supabase
       .channel(`session_guard_${currentUser.id}`)
       .on(
@@ -114,19 +125,25 @@ const App: React.FC = () => {
           filter: `id=eq.${currentUser.id}`, // Listen specifically for MY user ID updates
         },
         (payload) => {
+          console.log("[Realtime] User updated:", payload.new);
           // When an update happens, trigger the validity check logic
           checkSessionValidity();
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+              console.log("Realtime session guard active.");
+          }
+      });
 
     return () => {
       clearInterval(intervalId);
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('visibilitychange', onFocus);
+      window.removeEventListener('storage', onStorageChange);
       supabase.removeChannel(sessionChannel);
     };
-  }, [currentUser, showKickedOutModal]); // Dependency on showKickedOutModal ensures we stop checking if already kicked
+  }, [currentUser, showKickedOutModal]); 
 
   // --- SUPABASE AUTH LISTENER ---
   useEffect(() => {
@@ -142,8 +159,6 @@ const App: React.FC = () => {
          
          if (userProfile) {
            setCurrentUser(userProfile);
-           // Restore local session ID if missing in LS but present in DB (only on initial load logic if needed)
-           // But actually, we want strict enforcement. If LS is missing, they should re-login.
          } else if (session.user.email) {
            setCurrentUser({
              id: session.user.id,
@@ -463,6 +478,7 @@ const App: React.FC = () => {
                <p className="text-gray-500 mb-8">
                    Tài khoản của bạn vừa được đăng nhập trên một thiết bị khác. Để đảm bảo an toàn, phiên làm việc hiện tại đã bị ngắt.
                </p>
+               {/* No close button, user MUST re-login */}
                <button 
                   onClick={handleConfirmKickedOut}
                   className="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl transition-colors shadow-lg shadow-red-200"

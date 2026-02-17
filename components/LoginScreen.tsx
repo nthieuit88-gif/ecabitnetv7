@@ -99,26 +99,31 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onSelectUser })
       }
 
       // 2. Login Success: CRITICAL STEP for Single Device
+      // We MUST ensure the DB is updated before letting the user in.
+      // If we let them in but DB update fails, the session logic breaks.
       const newSessionId = generateSessionId();
-      
-      // Save to LocalStorage immediately - this marks "THIS" browser as the owner of the session
-      localStorage.setItem('ecabinet_session_id', newSessionId);
       
       try {
           // Update the user record with the new session ID in DB
-          await supabase.from('users').update({ 
+          const { error: updateError } = await supabase.from('users').update({ 
               current_session_id: newSessionId,
               status: 'active' 
           }).eq('email', user.email);
+
+          if (updateError) {
+             console.error("Session update failed:", updateError);
+             throw new Error("Không thể đồng bộ phiên làm việc. Vui lòng thử lại.");
+          }
+          
+          // Only save to LocalStorage AFTER successful DB update
+          localStorage.setItem('ecabinet_session_id', newSessionId);
           
           // Pass the user with the new session ID to App state
           const updatedUser = { ...user, current_session_id: newSessionId };
           onSelectUser(updatedUser);
 
-      } catch (dbError) {
-          console.error("Failed to update session ID", dbError);
-          // Still allow login even if tracking fails (e.g. table column missing)
-          onSelectUser(user);
+      } catch (dbError: any) {
+          throw new Error(dbError.message || "Lỗi kết nối cơ sở dữ liệu.");
       }
 
     } catch (err: any) {
