@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Presentation, CalendarDays, FileText, Users, LogOut, MonitorPlay } from 'lucide-react';
+import { LayoutDashboard, Presentation, CalendarDays, FileText, Users, LogOut, MonitorPlay, Settings } from 'lucide-react';
 import { NavItem } from '../types';
 
 interface SidebarProps {
@@ -14,6 +14,7 @@ const navItems: NavItem[] = [
   { id: 'meetings', label: 'Cuộc Họp', icon: CalendarDays, path: '/meetings' },
   { id: 'documents', label: 'Tài Liệu', icon: FileText, path: '/documents' },
   { id: 'users', label: 'Người Dùng', icon: Users, path: '/users' },
+  { id: 'settings', label: 'Hệ Thống', icon: Settings, path: '/settings' },
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, onLogout }) => {

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { User } from '../types';
-import { Shield, User as UserIcon, LogIn, MonitorPlay, Lock, Loader2, AlertTriangle, Mail, X } from 'lucide-react';
+import { Shield, User as UserIcon, LogIn, MonitorPlay, Lock, Loader2, AlertTriangle, Mail, X, KeyRound, ChevronRight } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 
 interface LoginScreenProps {
@@ -14,20 +14,21 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onSelectUser })
 
   // State
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [passwordInput, setPasswordInput] = useState('');
   const [error, setError] = useState('');
   const [infoMessage, setInfoMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
 
-  // Function to perform login automatically
-  const performAutoLogin = async (user: User, pass: string) => {
+  // Function to perform login logic
+  const performLogin = async (user: User, pass: string) => {
     setIsLoading(true);
     setError('');
     setInfoMessage('');
     setIsRegistering(false);
 
     try {
-      // 1. Try to Login
+      // 1. Try to Login via Supabase
       const { error: authError } = await supabase.auth.signInWithPassword({
         email: user.email,
         password: pass
@@ -49,8 +50,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onSelectUser })
              return;
         }
 
-        // 2. If login fails (invalid credentials), try Auto-Register
+        // 2. If login fails (invalid credentials), try Auto-Register ONLY if it looks like a system error
+        // For Admin manual login, 'Invalid login credentials' means wrong password typed by user.
         if (authError.message === 'Invalid login credentials') {
+           // If manual admin login, show error
+           if (user.role === 'admin') {
+              throw new Error("Mật khẩu không chính xác.");
+           }
+
+           // For auto-login users, try to register if it's the first time
            console.log("Login failed, attempting auto-registration...");
            setIsRegistering(true);
            
@@ -66,24 +74,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onSelectUser })
            });
 
            if (signUpError) {
-             // If disabled during signup too
              if (signUpError.message.includes("disabled")) {
                  onSelectUser(user);
                  return;
              }
-
              if (signUpError.message.includes("already registered")) {
-                // This means password was wrong for an existing user
-                throw new Error("Mật khẩu hệ thống đã bị thay đổi, không thể tự đăng nhập.");
+                throw new Error("Sai mật khẩu hệ thống.");
              }
              throw signUpError;
            }
 
            if (signUpData.session) {
-             return; // Success (handled by App.tsx)
+             return; // Success
            } else if (signUpData.user && !signUpData.session) {
-             // If signup success but no session (maybe confirm required), just let them in locally for now
-             // since we are in "Auto Login" mode
              onSelectUser(user);
              return;
            }
@@ -93,8 +96,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onSelectUser })
       }
       // Success (App.tsx handles session change)
     } catch (err: any) {
-      console.error("Auto Login Error:", err);
-      // Fallback for any other weird auth errors to ensure access
+      console.error("Login Error:", err);
+      // Fallback for weird auth errors to ensure access in demo mode
       if (err.message && (err.message.includes("disabled") || err.message.includes("Auth"))) {
          onSelectUser(user);
          return;
@@ -107,19 +110,42 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onSelectUser })
 
   const handleUserClick = (user: User) => {
     setSelectedUser(user);
+    setPasswordInput('');
+    setError('');
+    setInfoMessage('');
     
-    // Determine password based on role (Hardcoded for convenience as requested)
-    const autoPass = user.role === 'admin' ? 'Longphu25##' : 'Longphu26##';
-    
-    // Trigger Auto Login immediately
-    performAutoLogin(user, autoPass);
+    // Logic split:
+    // Admin: Show form, wait for input.
+    // User: Auto login immediately.
+    if (user.role === 'admin') {
+        setIsLoading(false);
+        // Wait for user to type password
+    } else {
+        const autoPass = 'Longphu26##';
+        performLogin(user, autoPass);
+    }
+  };
+
+  const handleAdminSubmit = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!selectedUser) return;
+      
+      // Check hardcoded requirement locally or pass to supabase
+      // For this system, we expect Admin26##
+      if (passwordInput !== 'Admin26##') {
+          setError("Mật khẩu quản trị không đúng.");
+          return;
+      }
+
+      performLogin(selectedUser, passwordInput);
   };
 
   const handleCancel = () => {
-    if (isLoading) return; // Prevent cancelling while processing
+    if (isLoading && !error) return; // Prevent cancelling while processing unless there is an error
     setSelectedUser(null);
     setError('');
     setInfoMessage('');
+    setPasswordInput('');
   };
 
   return (
@@ -150,7 +176,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onSelectUser })
             Phòng Họp Không Giấy
           </h1>
           <p className="mt-4 text-slate-400 text-lg font-light tracking-wider uppercase border-t border-slate-700 pt-4 px-8">
-            Hệ thống quản lý eCabinet <span className="text-emerald-500 font-bold">v6.0</span> (Auto Login)
+            Hệ thống quản lý eCabinet <span className="text-emerald-500 font-bold">v6.0</span>
           </p>
         </div>
 
@@ -179,7 +205,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onSelectUser })
                           <div>
                             <h3 className="font-bold text-slate-200 group-hover:text-purple-300 transition-colors">{user.name}</h3>
                             <span className="inline-block mt-1 text-[10px] font-bold bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded border border-purple-500/30">
-                              Bấm để vào ngay
+                              Đăng nhập an toàn
                             </span>
                           </div>
                           <Lock className="w-4 h-4 text-slate-500 ml-auto group-hover:text-purple-400" />
@@ -216,7 +242,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onSelectUser })
                           </div>
                           <div className="min-w-0 flex-1">
                             <h3 className="font-bold text-slate-300 text-sm truncate group-hover:text-emerald-300 transition-colors">{user.name}</h3>
-                            <p className="text-[10px] text-slate-500 truncate mt-0.5">Bấm để đăng nhập</p>
+                            <p className="text-[10px] text-slate-500 truncate mt-0.5">Bấm để đăng nhập (Auto)</p>
                           </div>
                           <LogIn className="w-3 h-3 text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity -ml-2" />
                         </button>
@@ -227,15 +253,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onSelectUser })
         </div>
       </div>
 
-      {/* Auto Login Loading Overlay */}
+      {/* Login Modal Overlay */}
       {selectedUser && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in duration-300">
             <div className={`bg-slate-900 border ${selectedUser.role === 'admin' ? 'border-purple-500/30' : 'border-emerald-500/30'} rounded-2xl shadow-2xl w-full max-w-sm p-8 flex flex-col items-center relative animate-in zoom-in-95 duration-300`}>
                 
-                {/* Close button only shows if error occurs or stuck */}
-                {(error || infoMessage) && (
-                    <button onClick={handleCancel} className="absolute top-2 right-2 p-2 text-slate-500 hover:text-white"><X/></button>
-                )}
+                {/* Close button */}
+                <button onClick={handleCancel} className="absolute top-2 right-2 p-2 text-slate-500 hover:text-white rounded-full hover:bg-white/10 transition-colors"><X className="w-5 h-5"/></button>
 
                 <div className="relative mb-6">
                     <div className={`w-20 h-20 rounded-full flex items-center justify-center border-4 ${selectedUser.role === 'admin' ? 'border-purple-500/30 bg-purple-500/10' : 'border-emerald-500/10 bg-emerald-500/10'}`}>
@@ -246,18 +270,42 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onSelectUser })
                     )}
                 </div>
 
-                <h3 className="text-xl font-bold text-white mb-2">{selectedUser.name}</h3>
+                <h3 className="text-xl font-bold text-white mb-1">{selectedUser.name}</h3>
+                <p className="text-sm text-slate-400 mb-6">{selectedUser.department}</p>
                 
-                {!error && !infoMessage && (
-                    <p className="text-slate-400 animate-pulse text-sm">Đang truy cập hệ thống...</p>
+                {/* Regular User Loading State */}
+                {selectedUser.role !== 'admin' && !error && !infoMessage && (
+                    <p className="text-emerald-400 animate-pulse text-sm font-medium">Đang tự động đăng nhập...</p>
                 )}
-
                 {isRegistering && (
                     <p className="text-[10px] text-blue-400 mt-2">Đang khởi tạo tài khoản lần đầu...</p>
                 )}
 
+                {/* ADMIN FORM: Only show if admin and not currently loading */}
+                {selectedUser.role === 'admin' && !isLoading && (
+                   <form onSubmit={handleAdminSubmit} className="w-full space-y-4">
+                      <div className="relative">
+                         <input 
+                            type="password" 
+                            autoFocus
+                            value={passwordInput}
+                            onChange={(e) => setPasswordInput(e.target.value)}
+                            className="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 pl-10 text-white placeholder-slate-500 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all"
+                            placeholder="Nhập mật khẩu quản trị"
+                         />
+                         <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
+                      </div>
+                      <button 
+                        type="submit"
+                        className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-purple-900/20"
+                      >
+                         Đăng Nhập <ChevronRight className="w-4 h-4" />
+                      </button>
+                   </form>
+                )}
+
                 {error && (
-                    <div className="mt-4 bg-red-500/10 border border-red-500/20 rounded-lg p-3 flex items-start gap-2 text-red-400 text-sm w-full">
+                    <div className="mt-4 bg-red-500/10 border border-red-500/20 rounded-lg p-3 flex items-start gap-2 text-red-400 text-sm w-full animate-in slide-in-from-top-2">
                         <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" /> 
                         <span>{error}</span>
                     </div>

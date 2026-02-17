@@ -7,6 +7,7 @@ import { DocumentList } from './components/DocumentList';
 import { UserList } from './components/UserList';
 import { LiveMeeting } from './components/LiveMeeting';
 import { LoginScreen } from './components/LoginScreen'; 
+import { SystemSettings } from './components/SystemSettings';
 import { TopBanner } from './components/TopBanner';
 import { BottomBanner } from './components/BottomBanner';
 import { Meeting, Room, Document, User } from './types';
@@ -206,6 +207,28 @@ const App: React.FC = () => {
     setActiveTab('dashboard');
   };
 
+  // SYSTEM RESTORE
+  const handleSystemRestore = async (data: { users: User[], rooms: Room[], meetings: Meeting[], documents: Document[] }) => {
+     // 1. Update Local State Immediately
+     if (data.users && data.users.length > 0) setUsers(data.users);
+     if (data.rooms && data.rooms.length > 0) setRooms(data.rooms);
+     if (data.meetings && data.meetings.length > 0) setMeetings(data.meetings);
+     if (data.documents && data.documents.length > 0) setDocuments(data.documents);
+
+     // 2. Attempt to Persist to Supabase (Upsert to prevent duplicates)
+     try {
+        if (data.users.length > 0) await supabase.from('users').upsert(data.users);
+        if (data.rooms.length > 0) await supabase.from('rooms').upsert(data.rooms);
+        if (data.meetings.length > 0) await supabase.from('meetings').upsert(data.meetings);
+        if (data.documents.length > 0) await supabase.from('documents').upsert(data.documents);
+        console.log("System restore synced to Supabase successfully.");
+     } catch (e) {
+        console.error("Error syncing restore to Supabase:", e);
+        // We do NOT rollback state here because we want the user to see the data they uploaded
+        // even if the backend sync fails (offline mode scenario)
+     }
+  };
+
   // MEETINGS
   const handleAddMeeting = async (newMeeting: Meeting) => {
     setMeetings(prev => [newMeeting, ...prev]);
@@ -388,6 +411,14 @@ const App: React.FC = () => {
             onDeleteUser={handleDeleteUser}
             pendingAction={pendingAction} 
             onActionComplete={handleActionComplete} 
+          />
+        );
+      case 'settings':
+        return (
+          <SystemSettings 
+            currentUser={currentUser}
+            currentData={{ users, rooms, meetings, documents }}
+            onRestore={handleSystemRestore}
           />
         );
       case 'live-meeting':
