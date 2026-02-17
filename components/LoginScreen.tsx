@@ -20,6 +20,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onSelectUser })
   const [isLoading, setIsLoading] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
 
+  // Helper to generate a unique session ID
+  const generateSessionId = () => {
+    return Date.now().toString(36) + Math.random().toString(36).substring(2);
+  };
+
   // Function to perform login logic
   const performLogin = async (user: User, pass: string) => {
     setIsLoading(true);
@@ -28,7 +33,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onSelectUser })
     setIsRegistering(false);
 
     try {
-      // 1. Try to Login via Supabase
+      // 1. Try to Login via Supabase Auth
       const { error: authError } = await supabase.auth.signInWithPassword({
         email: user.email,
         password: pass
@@ -42,23 +47,21 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onSelectUser })
             return;
         }
 
-        // CRITICAL: Handle "Email logins are disabled"
-        // This allows access even if Supabase config is restrictive (Offline/Demo Mode)
+        // Handle "Email logins are disabled" (Offline Mode Fallback)
         if (authError.message.includes("Email logins are disabled") || authError.message.includes("disabled")) {
              console.warn("Supabase Auth disabled/restricted. Switching to Local Bypass Mode.");
-             onSelectUser(user); // Force login locally via App.tsx prop
+             // In local mode, we can't enforce single device logic via DB, so just let them in
+             onSelectUser(user); 
              return;
         }
 
-        // 2. If login fails (invalid credentials), try Auto-Register ONLY if it looks like a system error
-        // For Admin manual login, 'Invalid login credentials' means wrong password typed by user.
+        // Invalid credentials check
         if (authError.message === 'Invalid login credentials') {
-           // If manual admin login, show error
            if (user.role === 'admin') {
               throw new Error("Mật khẩu không chính xác.");
            }
 
-           // For auto-login users, try to register if it's the first time
+           // Auto-register logic for regular users
            console.log("Login failed, attempting auto-registration...");
            setIsRegistering(true);
            
@@ -85,7 +88,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onSelectUser })
            }
 
            if (signUpData.session) {
-             return; // Success
+             // Registration success, proceed to update session ID below
            } else if (signUpData.user && !signUpData.session) {
              onSelectUser(user);
              return;
@@ -94,7 +97,27 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onSelectUser })
           throw authError;
         }
       }
-      // Success (App.tsx handles session change)
+
+      // 2. Login Success: Update Session ID in Database to enforce single device
+      const newSessionId = generateSessionId();
+      
+      try {
+          // Update the user record with the new session ID
+          await supabase.from('users').update({ 
+              current_session_id: newSessionId,
+              status: 'active' 
+          }).eq('email', user.email);
+          
+          // Pass the user with the new session ID to App state
+          const updatedUser = { ...user, current_session_id: newSessionId };
+          onSelectUser(updatedUser);
+
+      } catch (dbError) {
+          console.error("Failed to update session ID", dbError);
+          // Still allow login even if tracking fails (e.g. table column missing)
+          onSelectUser(user);
+      }
+
     } catch (err: any) {
       console.error("Login Error:", err);
       // Fallback for weird auth errors to ensure access in demo mode

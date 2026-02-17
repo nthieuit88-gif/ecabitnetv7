@@ -45,6 +45,7 @@ export interface User {
   status: 'active' | 'inactive';
   avatar?: string;
   department: string;
+  current_session_id?: string; // New field: Track active session
 }
 
 export interface Meeting {

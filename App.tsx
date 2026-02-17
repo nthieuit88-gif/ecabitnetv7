@@ -13,6 +13,7 @@ import { BottomBanner } from './components/BottomBanner';
 import { Meeting, Room, Document, User } from './types';
 import { supabase } from './supabaseClient';
 import { saveFileToLocal, getFileFromLocal } from './utils/indexedDB';
+import { AlertTriangle, LogOut } from 'lucide-react';
 import { 
   USERS as DEFAULT_USERS, 
   ROOMS as DEFAULT_ROOMS, 
@@ -24,6 +25,7 @@ const App: React.FC = () => {
   // --- AUTH STATE ---
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [showKickedOutModal, setShowKickedOutModal] = useState(false);
 
   // Initialize activeTab from localStorage to persist state after reload
   const [activeTab, setActiveTab] = useState(() => localStorage.getItem('ecabinet_activeTab') || 'dashboard');
@@ -49,6 +51,44 @@ const App: React.FC = () => {
       }, 100);
     }
   }, []);
+
+  // --- SINGLE DEVICE LOGIN ENFORCEMENT ---
+  useEffect(() => {
+    if (!currentUser || !currentUser.email) return;
+
+    // This channel listens for updates to the user's record in the DB
+    const sessionChannel = supabase
+      .channel(`session_guard_${currentUser.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'users',
+          filter: `email=eq.${currentUser.email}`,
+        },
+        (payload) => {
+          const newUser = payload.new as User;
+          
+          // Check if the session ID in DB is different from what we have locally
+          // AND we have a local session ID set (to avoid kicking out on initial load before sync)
+          if (
+            currentUser.current_session_id && 
+            newUser.current_session_id && 
+            newUser.current_session_id !== currentUser.current_session_id
+          ) {
+            console.warn("Duplicate login detected. Logging out this device.");
+            handleLogout(false); // Logout locally
+            setShowKickedOutModal(true); // Show alert
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(sessionChannel);
+    };
+  }, [currentUser]);
 
   // --- SUPABASE AUTH LISTENER ---
   useEffect(() => {
@@ -101,16 +141,20 @@ const App: React.FC = () => {
            });
          }
       } else if (event === 'SIGNED_OUT') {
-        setCurrentUser(null);
-        setActiveTab('dashboard');
-        localStorage.setItem('ecabinet_activeTab', 'dashboard');
+        // Only clear user if we are not showing the kicked out modal
+        // (If kicked out, we want to keep the modal visible)
+        if (!showKickedOutModal) {
+            setCurrentUser(null);
+            setActiveTab('dashboard');
+            localStorage.setItem('ecabinet_activeTab', 'dashboard');
+        }
       }
     });
 
     return () => {
       authListener.subscription.unsubscribe();
     };
-  }, []);
+  }, [showKickedOutModal]);
 
   // --- FETCH DATA FROM SUPABASE (With Fallback) ---
   useEffect(() => {
@@ -201,8 +245,8 @@ const App: React.FC = () => {
     }
   };
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
+  const handleLogout = async (triggerSignOut = true) => {
+    if (triggerSignOut) await supabase.auth.signOut();
     setCurrentUser(null);
     setActiveTab('dashboard');
   };
@@ -224,8 +268,6 @@ const App: React.FC = () => {
         console.log("System restore synced to Supabase successfully.");
      } catch (e) {
         console.error("Error syncing restore to Supabase:", e);
-        // We do NOT rollback state here because we want the user to see the data they uploaded
-        // even if the backend sync fails (offline mode scenario)
      }
   };
 
@@ -265,7 +307,6 @@ const App: React.FC = () => {
     if (error) console.error('Error adding document:', error);
   };
   
-  // NEW: Update document handler
   const handleUpdateDocument = async (updatedDoc: Document) => {
     setDocuments(prev => prev.map(d => d.id === updatedDoc.id ? updatedDoc : d));
     const { error } = await supabase.from('documents').update(updatedDoc).eq('id', updatedDoc.id);
@@ -341,8 +382,37 @@ const App: React.FC = () => {
     setPendingAction(null);
   };
 
+  // Close the kicked out modal and go back to login
+  const handleConfirmKickedOut = () => {
+      setShowKickedOutModal(false);
+      setCurrentUser(null); // Ensure user is cleared to show login screen
+  };
+
   if (authLoading) {
     return <div className="h-screen w-screen flex items-center justify-center bg-gray-900 text-emerald-500 font-bold">Đang xác thực hệ thống...</div>;
+  }
+
+  // Handle Kicked Out State
+  if (showKickedOutModal) {
+      return (
+        <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-300">
+           <div className="bg-white rounded-2xl max-w-md w-full p-8 text-center shadow-2xl border-4 border-red-500/20">
+               <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                   <LogOut className="w-10 h-10 text-red-600 ml-1" />
+               </div>
+               <h2 className="text-2xl font-bold text-gray-800 mb-2">Phiên Đăng Nhập Hết Hạn</h2>
+               <p className="text-gray-500 mb-8">
+                   Tài khoản của bạn vừa được đăng nhập trên một thiết bị khác. Để đảm bảo an toàn, phiên làm việc hiện tại đã bị ngắt.
+               </p>
+               <button 
+                  onClick={handleConfirmKickedOut}
+                  className="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl transition-colors shadow-lg shadow-red-200"
+               >
+                  Đăng Nhập Lại
+               </button>
+           </div>
+        </div>
+      );
   }
 
   if (!currentUser) {
