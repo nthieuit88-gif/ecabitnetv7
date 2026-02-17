@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { RoomList } from './components/RoomList';
@@ -26,6 +26,9 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [showKickedOutModal, setShowKickedOutModal] = useState(false);
+  
+  // Track mount time for Grace Period
+  const mountTimeRef = useRef(Date.now());
 
   // Initialize activeTab from localStorage to persist state after reload
   const [activeTab, setActiveTab] = useState(() => localStorage.getItem('ecabinet_activeTab') || 'dashboard');
@@ -52,12 +55,15 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // --- SESSION CHECK LOGIC (THE "Hybrid Check" v2) ---
+  // --- SESSION CHECK LOGIC (Robust "Hybrid Check" v3) ---
   const checkSessionValidity = async () => {
-      // 1. If not logged in or already kicked out, do nothing
+      // 1. Pre-checks: Must be logged in, not kicked out
       if (!currentUser || showKickedOutModal) return;
 
-      // 2. Get "My" Session ID from LocalStorage
+      // 2. Grace Period: Don't check in first 5 seconds to allow DB propagation/startup
+      if (Date.now() - mountTimeRef.current < 5000) return;
+
+      // 3. Get "My" Session ID from LocalStorage
       const localSessionId = localStorage.getItem('ecabinet_session_id');
       
       // Strict Check: If logged in but no session ID locally, something is wrong -> Kick.
@@ -67,7 +73,7 @@ const App: React.FC = () => {
           return; 
       }
 
-      // 3. Fetch "Real" Session ID from Database (Single Source of Truth)
+      // 4. Fetch "Real" Session ID from Database (Single Source of Truth)
       const { data: userOnDb, error } = await supabase
           .from('users')
           .select('current_session_id')
@@ -75,13 +81,14 @@ const App: React.FC = () => {
           .single();
 
       if (error || !userOnDb) {
-          // Network error or RLS issue. 
-          // Strategy: Be lenient to allow offline usage, BUT if we get specific "no row" error, kick out.
+          // Network error, RLS issue, or Offline mode.
+          // CRITICAL FIX: Do NOT kick user out if we can't reach the DB. 
+          // Assume session is valid until proven otherwise.
           return;
       }
 
-      // 4. COMPARE
-      // If DB says session is X, but I am session Y -> I am stale -> Kick me out
+      // 5. COMPARE
+      // Only kick if DB *explicitly* has a different ID (meaning another device logged in and updated it)
       if (userOnDb.current_session_id && userOnDb.current_session_id !== localSessionId) {
           console.warn(`[Security] Session mismatch! Local: ${localSessionId} vs DB: ${userOnDb.current_session_id}`);
           handleLogout(false); // Local logout
@@ -92,28 +99,27 @@ const App: React.FC = () => {
   // --- ACTIVATE SESSION GUARD ---
   useEffect(() => {
     if (!currentUser) return;
+    
+    // Reset mount time when user changes (logs in)
+    mountTimeRef.current = Date.now();
 
-    // 1. Check immediately on mount/login
-    checkSessionValidity();
+    // 1. Periodic Check (Heartbeat) - every 10s is sufficient
+    const intervalId = setInterval(checkSessionValidity, 10000);
 
-    // 2. Check periodically (every 5 seconds) - Aggressive Heartbeat
-    const intervalId = setInterval(checkSessionValidity, 5000);
-
-    // 3. Check when window gains focus (User comes back to tab)
+    // 2. Check on focus
     const onFocus = () => checkSessionValidity();
     window.addEventListener('focus', onFocus);
     window.addEventListener('visibilitychange', onFocus);
     
-    // 4. Check when LocalStorage changes (Multi-tab sync on same machine)
+    // 3. Multi-tab sync
     const onStorageChange = (e: StorageEvent) => {
         if (e.key === 'ecabinet_session_id' && e.newValue !== localStorage.getItem('ecabinet_session_id')) {
-            // Another tab updated the session ID? Re-check validity against DB.
             checkSessionValidity();
         }
     };
     window.addEventListener('storage', onStorageChange);
 
-    // 5. Realtime Listener (Instant Reaction)
+    // 4. Realtime Listener
     const sessionChannel = supabase
       .channel(`session_guard_${currentUser.id}`)
       .on(
@@ -122,19 +128,13 @@ const App: React.FC = () => {
           event: 'UPDATE',
           schema: 'public',
           table: 'users',
-          filter: `id=eq.${currentUser.id}`, // Listen specifically for MY user ID updates
+          filter: `id=eq.${currentUser.id}`,
         },
         (payload) => {
-          console.log("[Realtime] User updated:", payload.new);
-          // When an update happens, trigger the validity check logic
           checkSessionValidity();
         }
       )
-      .subscribe((status) => {
-          if (status === 'SUBSCRIBED') {
-              console.log("Realtime session guard active.");
-          }
-      });
+      .subscribe();
 
     return () => {
       clearInterval(intervalId);
@@ -196,13 +196,11 @@ const App: React.FC = () => {
            });
          }
       } else if (event === 'SIGNED_OUT') {
-        // Only clear user if we are not showing the kicked out modal
-        // (If kicked out, we want to keep the modal visible)
         if (!showKickedOutModal) {
             setCurrentUser(null);
             setActiveTab('dashboard');
             localStorage.setItem('ecabinet_activeTab', 'dashboard');
-            localStorage.removeItem('ecabinet_session_id'); // Clear session token
+            localStorage.removeItem('ecabinet_session_id');
         }
       }
     });
@@ -246,14 +244,10 @@ const App: React.FC = () => {
           const newDoc = payload.new as Document;
           setDocuments((prev) => [newDoc, ...prev]);
 
-          // NEW: If a new doc comes in, try to download and cache it immediately
-          // This allows users who are online to have the "original file" for preview
           if (newDoc.url && !newDoc.url.startsWith('blob:')) {
              try {
-                // Check if we already have it (e.g. we are the uploader)
                 const existing = await getFileFromLocal(newDoc.id);
                 if (!existing) {
-                    console.log(`[Auto-Cache] Downloading new document: ${newDoc.name}`);
                     const response = await fetch(newDoc.url);
                     if (response.ok) {
                         const blob = await response.blob();
@@ -320,20 +314,16 @@ const App: React.FC = () => {
         if (data.documents && Array.isArray(data.documents)) setDocuments(data.documents);
 
         // 2. Attempt to Persist to Supabase (Best Effort)
-        // We use individual try/catch blocks so one failure doesn't stop the whole process
-        
         const upsertTable = async (table: string, records: any[]) => {
             if (!records || records.length === 0) return;
             const { error } = await supabase.from(table).upsert(records);
             if (error) {
                 console.warn(`[Restore] Sync failed for ${table}:`, error.message);
-                // We do NOT re-throw here to allow other tables to proceed
             } else {
                 console.log(`[Restore] Synced ${table} successfully.`);
             }
         };
 
-        // Order matters for Foreign Keys: Users -> Rooms/Docs -> Meetings
         await upsertTable('users', data.users);
         await upsertTable('rooms', data.rooms);
         await upsertTable('documents', data.documents);
@@ -341,7 +331,7 @@ const App: React.FC = () => {
 
      } catch (e) {
         console.error("Critical error during system restore:", e);
-        throw e; // This will be caught by SystemSettings to show error toast
+        throw e;
      }
   };
 
@@ -459,7 +449,7 @@ const App: React.FC = () => {
   // Close the kicked out modal and go back to login
   const handleConfirmKickedOut = () => {
       setShowKickedOutModal(false);
-      setCurrentUser(null); // Ensure user is cleared to show login screen
+      setCurrentUser(null); 
   };
 
   if (authLoading) {
@@ -478,7 +468,6 @@ const App: React.FC = () => {
                <p className="text-gray-500 mb-8">
                    Tài khoản của bạn vừa được đăng nhập trên một thiết bị khác. Để đảm bảo an toàn, phiên làm việc hiện tại đã bị ngắt.
                </p>
-               {/* No close button, user MUST re-login */}
                <button 
                   onClick={handleConfirmKickedOut}
                   className="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl transition-colors shadow-lg shadow-red-200"
@@ -491,98 +480,28 @@ const App: React.FC = () => {
   }
 
   if (!currentUser) {
-    // Falls back to local login handling if Supabase fails
     return <LoginScreen users={users} onSelectUser={(user) => setCurrentUser(user)} />;
   }
 
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard':
-        return (
-          <Dashboard 
-            currentUser={currentUser}
-            onNavigate={handleNavigate} 
-            meetings={meetings}
-            rooms={rooms}
-            documents={documents}
-          />
-        );
+        return <Dashboard currentUser={currentUser} onNavigate={handleNavigate} meetings={meetings} rooms={rooms} documents={documents} />;
       case 'rooms':
-        return (
-          <RoomList 
-            rooms={rooms}
-            onAddRoom={handleAddRoom}
-            onUpdateRoomStatus={handleUpdateRoomStatus}
-            pendingAction={pendingAction} 
-            onActionComplete={handleActionComplete} 
-            onJoinRoom={handleJoinRoom} 
-            allDocuments={documents}
-          />
-        );
+        return <RoomList rooms={rooms} onAddRoom={handleAddRoom} onUpdateRoomStatus={handleUpdateRoomStatus} pendingAction={pendingAction} onActionComplete={handleActionComplete} onJoinRoom={handleJoinRoom} allDocuments={documents} />;
       case 'meetings':
-        return (
-          <MeetingList 
-            currentUser={currentUser}
-            meetings={meetings}
-            onAddMeeting={handleAddMeeting}
-            onUpdateMeeting={handleUpdateMeeting}
-            onDeleteMeeting={handleDeleteMeeting}
-            pendingAction={pendingAction} 
-            onActionComplete={handleActionComplete} 
-            onJoinMeeting={handleJoinMeeting}
-            allDocuments={documents}
-            allRooms={rooms}
-            allUsers={users}
-          />
-        );
+        return <MeetingList currentUser={currentUser} meetings={meetings} onAddMeeting={handleAddMeeting} onUpdateMeeting={handleUpdateMeeting} onDeleteMeeting={handleDeleteMeeting} pendingAction={pendingAction} onActionComplete={handleActionComplete} onJoinMeeting={handleJoinMeeting} allDocuments={documents} allRooms={rooms} allUsers={users} />;
       case 'documents':
-        return (
-          <DocumentList 
-            currentUser={currentUser}
-            documents={documents}
-            onAddDocument={handleAddDocument}
-            onUpdateDocument={handleUpdateDocument}
-            onDeleteDocument={handleDeleteDocument}
-            pendingAction={pendingAction} 
-            onActionComplete={handleActionComplete} 
-          />
-        );
+        return <DocumentList currentUser={currentUser} documents={documents} onAddDocument={handleAddDocument} onUpdateDocument={handleUpdateDocument} onDeleteDocument={handleDeleteDocument} pendingAction={pendingAction} onActionComplete={handleActionComplete} />;
       case 'users':
-        return (
-          <UserList 
-            users={users}
-            onAddUser={handleAddUser}
-            onUpdateUser={handleUpdateUser}
-            onDeleteUser={handleDeleteUser}
-            pendingAction={pendingAction} 
-            onActionComplete={handleActionComplete} 
-          />
-        );
+        return <UserList users={users} onAddUser={handleAddUser} onUpdateUser={handleUpdateUser} onDeleteUser={handleDeleteUser} pendingAction={pendingAction} onActionComplete={handleActionComplete} />;
       case 'settings':
-        return (
-          <SystemSettings 
-            currentUser={currentUser}
-            currentData={{ users, rooms, meetings, documents }}
-            onRestore={handleSystemRestore}
-          />
-        );
+        return <SystemSettings currentUser={currentUser} currentData={{ users, rooms, meetings, documents }} onRestore={handleSystemRestore} />;
       case 'live-meeting':
         let meeting = meetings.find(m => m.id === activeMeetingId);
-        if (!meeting && tempMeeting && tempMeeting.id === activeMeetingId) {
-             meeting = tempMeeting;
-        }
+        if (!meeting && tempMeeting && tempMeeting.id === activeMeetingId) meeting = tempMeeting;
         if (!meeting) return <MeetingList currentUser={currentUser} meetings={meetings} onAddMeeting={handleAddMeeting} onUpdateMeeting={handleUpdateMeeting} onDeleteMeeting={handleDeleteMeeting} allDocuments={documents} allRooms={rooms} allUsers={users} />; 
-        
-        return (
-          <LiveMeeting 
-            currentUser={currentUser}
-            meeting={meeting} 
-            onLeave={handleLeaveMeeting} 
-            allDocuments={documents}
-            onAddDocument={handleAddDocument}
-            onUpdateMeeting={handleUpdateMeeting}
-          />
-        );
+        return <LiveMeeting currentUser={currentUser} meeting={meeting} onLeave={handleLeaveMeeting} allDocuments={documents} onAddDocument={handleAddDocument} onUpdateMeeting={handleUpdateMeeting} />;
       default:
         return <Dashboard currentUser={currentUser} onNavigate={handleNavigate} meetings={meetings} rooms={rooms} documents={documents} />;
     }

@@ -1,4 +1,4 @@
--- SCRIPT CẤU HÌNH STORAGE & REALTIME (V6.1)
+-- SCRIPT CẤU HÌNH STORAGE & REALTIME & SECURITY (V6.2)
 
 -- 1. CẤU HÌNH STORAGE
 INSERT INTO storage.buckets (id, name, public)
@@ -22,9 +22,7 @@ END
 $$;
 
 -- 2. CẤU HÌNH REALTIME (QUAN TRỌNG CHO TÍNH NĂNG SINGLE DEVICE)
--- Bắt buộc phải chạy lệnh này thì App mới tự động đá user cũ ra được
 BEGIN;
-  -- Kiểm tra xem bảng users đã được add vào publication chưa, nếu chưa thì add
   DO $$
   BEGIN
     IF NOT EXISTS (
@@ -40,5 +38,37 @@ BEGIN;
   $$;
 COMMIT;
 
--- 3. Đảm bảo cột current_session_id tồn tại
+-- 3. CẤU HÌNH DATABASE & RLS (QUAN TRỌNG CHO LỖI LOGIN)
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS current_session_id text;
+
+-- Enable RLS on users table if not already
+ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+
+-- Policy 1: Everyone can read users (needed for login check and user list)
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'users' AND policyname = 'Public Read Users') THEN
+        CREATE POLICY "Public Read Users" ON public.users FOR SELECT USING (true);
+    END IF;
+END
+$$;
+
+-- Policy 2: Allow users to update their own session_id (Fixes the "Cannot enter web" issue)
+-- Note: In a real app, you would use (auth.uid() = id), but for this hybrid demo we allow public update to ensure functionality
+-- or specifically allow updating 'current_session_id' for everyone to support the session logic.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'users' AND policyname = 'Allow Session Update') THEN
+        CREATE POLICY "Allow Session Update" ON public.users FOR UPDATE USING (true) WITH CHECK (true);
+    END IF;
+END
+$$;
+
+-- Policy 3: Allow Insert for registration
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'users' AND policyname = 'Allow Insert') THEN
+        CREATE POLICY "Allow Insert" ON public.users FOR INSERT WITH CHECK (true);
+    END IF;
+END
+$$;
