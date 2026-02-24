@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, MapPin, Plus, User, MoreVertical, Users, X, Calendar, Trash2, CheckCircle2, Video, Paperclip, FileText, Edit } from 'lucide-react';
+import { Clock, MapPin, Plus, User, MoreVertical, Users, X, Calendar, Trash2, CheckCircle2, Video, Paperclip, FileText, Edit, ArrowUp, ArrowDown } from 'lucide-react';
 import { Meeting, Room, Document, User as UserType } from '../types';
 
 interface MeetingListProps {
@@ -127,6 +127,24 @@ export const MeetingList: React.FC<MeetingListProps> = ({
 
   const handleRemoveParticipant = (userId: string) => {
     setSelectedParticipantIds(prev => prev.filter(id => id !== userId));
+  };
+
+  const moveDocUp = (index: number) => {
+    if (index === 0) return;
+    setFormData(prev => {
+      const newDocs = [...prev.selectedDocIds];
+      [newDocs[index - 1], newDocs[index]] = [newDocs[index], newDocs[index - 1]];
+      return { ...prev, selectedDocIds: newDocs };
+    });
+  };
+
+  const moveDocDown = (index: number) => {
+    if (index === formData.selectedDocIds.length - 1) return;
+    setFormData(prev => {
+      const newDocs = [...prev.selectedDocIds];
+      [newDocs[index + 1], newDocs[index]] = [newDocs[index], newDocs[index + 1]];
+      return { ...prev, selectedDocIds: newDocs };
+    });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -288,24 +306,28 @@ export const MeetingList: React.FC<MeetingListProps> = ({
                       <>
                         <div className="fixed inset-0 z-10" onClick={() => setActiveMenuId(null)}></div>
                         <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-lg shadow-xl border border-gray-100 z-20 py-1 animate-in fade-in zoom-in-95 duration-100">
-                          <button 
-                            onClick={() => {
-                                openModal(meeting);
-                                setActiveMenuId(null);
-                            }}
-                            className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
-                          >
-                             <Edit className="w-4 h-4 text-blue-500" /> Chỉnh sửa
-                          </button>
+                          {(currentUser.role === 'admin' || currentUser.id === meeting.hostId) && (
+                            <button 
+                              onClick={() => {
+                                  openModal(meeting);
+                                  setActiveMenuId(null);
+                              }}
+                              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                            >
+                               <Edit className="w-4 h-4 text-blue-500" /> Chỉnh sửa
+                            </button>
+                          )}
                           <button className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
                              <CheckCircle2 className="w-4 h-4 text-emerald-500" /> Điểm danh
                           </button>
-                          <button 
-                            onClick={() => handleDelete(meeting.id)}
-                            className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
-                          >
-                             <Trash2 className="w-4 h-4" /> Hủy cuộc họp
-                          </button>
+                          {(currentUser.role === 'admin' || currentUser.id === meeting.hostId) && (
+                            <button 
+                              onClick={() => handleDelete(meeting.id)}
+                              className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 border-t border-gray-50"
+                            >
+                               <Trash2 className="w-4 h-4" /> Hủy cuộc họp
+                            </button>
+                          )}
                         </div>
                       </>
                     )}
@@ -455,16 +477,60 @@ export const MeetingList: React.FC<MeetingListProps> = ({
                 </div>
               </div>
 
-              {/* Document Selection */}
+              {/* Document Selection and Reordering */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Đính kèm tài liệu từ kho</label>
+                
+                {/* Selected Documents (Reorderable) */}
+                {formData.selectedDocIds.length > 0 && (
+                  <div className="mb-3 border border-emerald-200 rounded-lg bg-emerald-50/30 p-2 space-y-2">
+                    <p className="text-xs font-semibold text-emerald-700 mb-1 px-1">Tài liệu đã chọn (Sắp xếp thứ tự):</p>
+                    {formData.selectedDocIds.map((docId, index) => {
+                      const doc = allDocuments.find(d => d.id === docId);
+                      if (!doc) return null;
+                      return (
+                        <div key={docId} className="flex items-center gap-2 p-2 bg-white border border-emerald-100 rounded shadow-sm">
+                          <div className="flex flex-col gap-1">
+                            <button 
+                              type="button" 
+                              onClick={() => moveDocUp(index)} 
+                              disabled={index === 0}
+                              className="p-0.5 text-gray-400 hover:text-emerald-600 disabled:opacity-30"
+                            >
+                              <ArrowUp className="w-3 h-3" />
+                            </button>
+                            <button 
+                              type="button" 
+                              onClick={() => moveDocDown(index)} 
+                              disabled={index === formData.selectedDocIds.length - 1}
+                              className="p-0.5 text-gray-400 hover:text-emerald-600 disabled:opacity-30"
+                            >
+                              <ArrowDown className="w-3 h-3" />
+                            </button>
+                          </div>
+                          <FileText className="w-4 h-4 text-emerald-500" />
+                          <span className="flex-1 text-sm text-gray-700 truncate">{doc.name}</span>
+                          <button 
+                            type="button"
+                            onClick={() => toggleDocumentSelection(docId)}
+                            className="p-1 text-gray-400 hover:text-red-500 rounded-full hover:bg-red-50"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Available Documents */}
                 <div className="border border-gray-200 rounded-lg max-h-40 overflow-y-auto bg-gray-50 p-2 space-y-2">
-                  {allDocuments.map(doc => (
+                  {allDocuments.filter(d => !formData.selectedDocIds.includes(d.id)).map(doc => (
                     <div key={doc.id} className="flex items-center gap-2 p-2 bg-white border border-gray-100 rounded hover:border-emerald-200">
                       <input 
                         type="checkbox" 
                         id={`doc-${doc.id}`}
-                        checked={formData.selectedDocIds.includes(doc.id)}
+                        checked={false}
                         onChange={() => toggleDocumentSelection(doc.id)}
                         className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
                       />
@@ -474,7 +540,9 @@ export const MeetingList: React.FC<MeetingListProps> = ({
                       </label>
                     </div>
                   ))}
-                  {allDocuments.length === 0 && <p className="text-xs text-gray-400 text-center">Chưa có tài liệu nào trong kho</p>}
+                  {allDocuments.filter(d => !formData.selectedDocIds.includes(d.id)).length === 0 && (
+                    <p className="text-xs text-gray-400 text-center py-2">Không còn tài liệu nào khác</p>
+                  )}
                 </div>
               </div>
 

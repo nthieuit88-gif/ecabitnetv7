@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Wifi, Monitor, Coffee, Plus, MoreHorizontal, X, Tv, PenTool, Check, FileText, Paperclip, Video } from 'lucide-react';
-import { Room, Document } from '../types';
+import { Users, Wifi, Monitor, Coffee, Plus, MoreHorizontal, X, Tv, PenTool, Check, FileText, Paperclip, Video, ArrowUp, ArrowDown, Edit } from 'lucide-react';
+import { Room, Document, User } from '../types';
 
 interface RoomListProps {
   pendingAction?: string | null;
@@ -9,7 +9,9 @@ interface RoomListProps {
   rooms: Room[];
   onAddRoom: (room: Room) => void;
   onUpdateRoomStatus: (id: string, status: Room['status']) => void;
+  onUpdateRoom: (room: Room) => void;
   allDocuments: Document[];
+  currentUser: User;
 }
 
 const getStatusColor = (status: Room['status']) => {
@@ -45,9 +47,12 @@ export const RoomList: React.FC<RoomListProps> = ({
   rooms, 
   onAddRoom, 
   onUpdateRoomStatus,
-  allDocuments 
+  onUpdateRoom,
+  allDocuments,
+  currentUser
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingRoomId, setEditingRoomId] = useState<string | null>(null);
   const [activeMenuRoomId, setActiveMenuRoomId] = useState<string | null>(null);
   
   // Form States
@@ -56,28 +61,58 @@ export const RoomList: React.FC<RoomListProps> = ({
   const [selectedFacilities, setSelectedFacilities] = useState<string[]>([]);
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
 
+  const isAdmin = currentUser.role === 'admin';
+
   // Handle pending action from Dashboard
   useEffect(() => {
     if (pendingAction === 'add') {
-      setIsModalOpen(true);
+      openModal();
       if (onActionComplete) onActionComplete();
     }
   }, [pendingAction, onActionComplete]);
 
-  const handleAdd = (e: React.FormEvent) => {
+  const openModal = (roomToEdit?: Room) => {
+    if (roomToEdit) {
+      setEditingRoomId(roomToEdit.id);
+      setNewRoomName(roomToEdit.name);
+      setNewRoomCapacity(roomToEdit.capacity.toString());
+      setSelectedFacilities(roomToEdit.facilities);
+      setSelectedDocIds(roomToEdit.documentIds || []);
+    } else {
+      setEditingRoomId(null);
+      resetForm();
+    }
+    setIsModalOpen(true);
+  };
+
+  const handleAddOrUpdate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newRoomName || !newRoomCapacity) return;
 
-    const newRoom: Room = {
-      id: `r${Date.now()}`,
-      name: newRoomName,
-      capacity: parseInt(newRoomCapacity),
-      status: 'available',
-      facilities: selectedFacilities,
-      documentIds: selectedDocIds,
-    };
+    if (editingRoomId) {
+      const originalRoom = rooms.find(r => r.id === editingRoomId);
+      if (originalRoom) {
+        const updatedRoom: Room = {
+          ...originalRoom,
+          name: newRoomName,
+          capacity: parseInt(newRoomCapacity),
+          facilities: selectedFacilities,
+          documentIds: selectedDocIds,
+        };
+        onUpdateRoom(updatedRoom);
+      }
+    } else {
+      const newRoom: Room = {
+        id: `r${Date.now()}`,
+        name: newRoomName,
+        capacity: parseInt(newRoomCapacity),
+        status: 'available',
+        facilities: selectedFacilities,
+        documentIds: selectedDocIds,
+      };
+      onAddRoom(newRoom);
+    }
 
-    onAddRoom(newRoom);
     resetForm();
     setIsModalOpen(false);
   };
@@ -105,6 +140,20 @@ export const RoomList: React.FC<RoomListProps> = ({
     );
   };
 
+  const moveDocUp = (index: number) => {
+    if (index === 0) return;
+    const newDocs = [...selectedDocIds];
+    [newDocs[index - 1], newDocs[index]] = [newDocs[index], newDocs[index - 1]];
+    setSelectedDocIds(newDocs);
+  };
+
+  const moveDocDown = (index: number) => {
+    if (index === selectedDocIds.length - 1) return;
+    const newDocs = [...selectedDocIds];
+    [newDocs[index + 1], newDocs[index]] = [newDocs[index], newDocs[index + 1]];
+    setSelectedDocIds(newDocs);
+  };
+
   return (
     <div className="p-8 space-y-6 max-w-7xl mx-auto relative min-h-screen">
       <div className="flex justify-between items-center mb-6">
@@ -112,13 +161,15 @@ export const RoomList: React.FC<RoomListProps> = ({
           <h2 className="text-2xl font-bold text-gray-800">Danh Sách Phòng Họp</h2>
           <p className="text-sm text-gray-500 mt-1">Quản lý trạng thái và thiết bị phòng họp</p>
         </div>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-colors shadow-sm shadow-emerald-200"
-        >
-          <Plus className="w-4 h-4" />
-          Thêm Phòng Mới
-        </button>
+        {isAdmin && (
+          <button 
+            onClick={() => openModal()}
+            className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-colors shadow-sm shadow-emerald-200"
+          >
+            <Plus className="w-4 h-4" />
+            Thêm Phòng Mới
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -138,68 +189,79 @@ export const RoomList: React.FC<RoomListProps> = ({
                 <h3 className="font-bold text-gray-800 text-lg truncate pr-8" title={room.name}>{room.name}</h3>
                 
                 {/* Menu Action Button */}
-                <div className="relative">
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActiveMenuRoomId(activeMenuRoomId === room.id ? null : room.id);
-                    }}
-                    className={`text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-100 transition-all ${activeMenuRoomId === room.id ? 'opacity-100 bg-gray-100 text-gray-600' : 'opacity-0 group-hover:opacity-100'}`}
-                  >
-                    <MoreHorizontal className="w-5 h-5" />
-                  </button>
+                {isAdmin && (
+                  <div className="relative">
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveMenuRoomId(activeMenuRoomId === room.id ? null : room.id);
+                      }}
+                      className={`text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-100 transition-all ${activeMenuRoomId === room.id ? 'opacity-100 bg-gray-100 text-gray-600' : 'opacity-0 group-hover:opacity-100'}`}
+                    >
+                      <MoreHorizontal className="w-5 h-5" />
+                    </button>
 
-                  {/* Dropdown Menu */}
-                  {activeMenuRoomId === room.id && (
-                    <>
-                      <div className="fixed inset-0 z-20 cursor-default" onClick={() => setActiveMenuRoomId(null)}></div>
-                      <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-lg shadow-xl border border-gray-100 z-30 py-1 animate-in fade-in zoom-in-95 duration-100">
-                        <div className="px-4 py-2 border-b border-gray-50 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                          Đổi Trạng Thái
+                    {/* Dropdown Menu */}
+                    {activeMenuRoomId === room.id && (
+                      <>
+                        <div className="fixed inset-0 z-20 cursor-default" onClick={() => setActiveMenuRoomId(null)}></div>
+                        <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-lg shadow-xl border border-gray-100 z-30 py-1 animate-in fade-in zoom-in-95 duration-100">
+                          <button 
+                            onClick={() => {
+                                openModal(room);
+                                setActiveMenuRoomId(null);
+                            }}
+                            className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 border-b border-gray-50"
+                          >
+                             <Edit className="w-4 h-4 text-blue-500" /> Chỉnh sửa
+                          </button>
+                          <div className="px-4 py-2 border-b border-gray-50 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                            Đổi Trạng Thái
+                          </div>
+                          <button 
+                            onClick={() => {
+                                onUpdateRoomStatus(room.id, 'available');
+                                setActiveMenuRoomId(null);
+                            }}
+                            className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-emerald-50 hover:text-emerald-700 flex items-center justify-between group/item"
+                          >
+                            <span className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                              Sẵn sàng
+                            </span>
+                            {room.status === 'available' && <Check className="w-3.5 h-3.5" />}
+                          </button>
+                          <button 
+                            onClick={() => {
+                                onUpdateRoomStatus(room.id, 'occupied');
+                                setActiveMenuRoomId(null);
+                            }}
+                            className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-red-50 hover:text-red-700 flex items-center justify-between group/item"
+                          >
+                            <span className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                              Đang sử dụng
+                            </span>
+                            {room.status === 'occupied' && <Check className="w-3.5 h-3.5" />}
+                          </button>
+                          <button 
+                            onClick={() => {
+                                onUpdateRoomStatus(room.id, 'maintenance');
+                                setActiveMenuRoomId(null);
+                            }}
+                            className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 hover:text-gray-700 flex items-center justify-between group/item"
+                          >
+                            <span className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-gray-500"></span>
+                              Bảo trì
+                            </span>
+                            {room.status === 'maintenance' && <Check className="w-3.5 h-3.5" />}
+                          </button>
                         </div>
-                        <button 
-                          onClick={() => {
-                              onUpdateRoomStatus(room.id, 'available');
-                              setActiveMenuRoomId(null);
-                          }}
-                          className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-emerald-50 hover:text-emerald-700 flex items-center justify-between group/item"
-                        >
-                          <span className="flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                            Sẵn sàng
-                          </span>
-                          {room.status === 'available' && <Check className="w-3.5 h-3.5" />}
-                        </button>
-                        <button 
-                          onClick={() => {
-                              onUpdateRoomStatus(room.id, 'occupied');
-                              setActiveMenuRoomId(null);
-                          }}
-                          className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-red-50 hover:text-red-700 flex items-center justify-between group/item"
-                        >
-                          <span className="flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full bg-red-500"></span>
-                            Đang sử dụng
-                          </span>
-                          {room.status === 'occupied' && <Check className="w-3.5 h-3.5" />}
-                        </button>
-                        <button 
-                          onClick={() => {
-                              onUpdateRoomStatus(room.id, 'maintenance');
-                              setActiveMenuRoomId(null);
-                          }}
-                          className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 hover:text-gray-700 flex items-center justify-between group/item"
-                        >
-                          <span className="flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full bg-gray-500"></span>
-                            Bảo trì
-                          </span>
-                          {room.status === 'maintenance' && <Check className="w-3.5 h-3.5" />}
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-2 text-gray-500 text-sm mb-4">
@@ -248,12 +310,12 @@ export const RoomList: React.FC<RoomListProps> = ({
         ))}
       </div>
 
-      {/* Add Room Modal */}
+      {/* Add/Edit Room Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
             <div className="p-6 border-b border-gray-100 flex justify-between items-center shrink-0">
-              <h3 className="text-xl font-bold text-gray-800">Thêm Phòng Họp Mới</h3>
+              <h3 className="text-xl font-bold text-gray-800">{editingRoomId ? 'Chỉnh Sửa Phòng Họp' : 'Thêm Phòng Họp Mới'}</h3>
               <button 
                 onClick={() => setIsModalOpen(false)}
                 className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
@@ -262,7 +324,7 @@ export const RoomList: React.FC<RoomListProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleAdd} className="p-6 space-y-5 overflow-y-auto">
+            <form onSubmit={handleAddOrUpdate} className="p-6 space-y-5 overflow-y-auto">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Tên phòng họp</label>
                 <input 
@@ -308,16 +370,60 @@ export const RoomList: React.FC<RoomListProps> = ({
                 </div>
               </div>
 
-              {/* Document Selection */}
+              {/* Document Selection and Reordering */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Quy định / Hướng dẫn (Từ kho tài liệu)</label>
+                
+                {/* Selected Documents (Reorderable) */}
+                {selectedDocIds.length > 0 && (
+                  <div className="mb-3 border border-emerald-200 rounded-lg bg-emerald-50/30 p-2 space-y-2">
+                    <p className="text-xs font-semibold text-emerald-700 mb-1 px-1">Tài liệu đã chọn (Sắp xếp thứ tự):</p>
+                    {selectedDocIds.map((docId, index) => {
+                      const doc = allDocuments.find(d => d.id === docId);
+                      if (!doc) return null;
+                      return (
+                        <div key={docId} className="flex items-center gap-2 p-2 bg-white border border-emerald-100 rounded shadow-sm">
+                          <div className="flex flex-col gap-1">
+                            <button 
+                              type="button" 
+                              onClick={() => moveDocUp(index)} 
+                              disabled={index === 0}
+                              className="p-0.5 text-gray-400 hover:text-emerald-600 disabled:opacity-30"
+                            >
+                              <ArrowUp className="w-3 h-3" />
+                            </button>
+                            <button 
+                              type="button" 
+                              onClick={() => moveDocDown(index)} 
+                              disabled={index === selectedDocIds.length - 1}
+                              className="p-0.5 text-gray-400 hover:text-emerald-600 disabled:opacity-30"
+                            >
+                              <ArrowDown className="w-3 h-3" />
+                            </button>
+                          </div>
+                          <FileText className="w-4 h-4 text-emerald-500" />
+                          <span className="flex-1 text-sm text-gray-700 truncate">{doc.name}</span>
+                          <button 
+                            type="button"
+                            onClick={() => toggleDocumentSelection(docId)}
+                            className="p-1 text-gray-400 hover:text-red-500 rounded-full hover:bg-red-50"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Available Documents */}
                 <div className="border border-gray-200 rounded-lg max-h-40 overflow-y-auto bg-gray-50 p-2 space-y-2">
-                  {allDocuments.map(doc => (
+                  {allDocuments.filter(d => !selectedDocIds.includes(d.id)).map(doc => (
                     <div key={doc.id} className="flex items-center gap-2 p-2 bg-white border border-gray-100 rounded hover:border-emerald-200">
                       <input 
                         type="checkbox" 
                         id={`room-doc-${doc.id}`}
-                        checked={selectedDocIds.includes(doc.id)}
+                        checked={false}
                         onChange={() => toggleDocumentSelection(doc.id)}
                         className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
                       />
@@ -327,7 +433,9 @@ export const RoomList: React.FC<RoomListProps> = ({
                       </label>
                     </div>
                   ))}
-                  {allDocuments.length === 0 && <p className="text-xs text-gray-400 text-center">Chưa có tài liệu nào</p>}
+                  {allDocuments.filter(d => !selectedDocIds.includes(d.id)).length === 0 && (
+                    <p className="text-xs text-gray-400 text-center py-2">Không còn tài liệu nào khác</p>
+                  )}
                 </div>
               </div>
 
@@ -343,7 +451,7 @@ export const RoomList: React.FC<RoomListProps> = ({
                   type="submit"
                   className="flex-1 py-2.5 px-4 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 font-medium transition-colors shadow-lg shadow-emerald-200"
                 >
-                  Thêm Phòng
+                  {editingRoomId ? 'Lưu Thay Đổi' : 'Thêm Phòng'}
                 </button>
               </div>
             </form>

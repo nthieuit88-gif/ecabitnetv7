@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Mic, MicOff, Video, VideoOff, PhoneOff, MessageSquare, Users, Share, MoreHorizontal, LayoutGrid, X, FileText, Plus, Eye, Download, ChevronRight, Search, UploadCloud, Loader2, ChevronLeft, Minus, ZoomIn, ZoomOut, Maximize, FileSpreadsheet, FileIcon, RefreshCw, AlertTriangle, ExternalLink, Info, Database, Globe, Vote, ArrowLeftRight } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, PhoneOff, MessageSquare, Users, Share, MoreHorizontal, LayoutGrid, X, FileText, Plus, Eye, Download, ChevronRight, Search, UploadCloud, Loader2, ChevronLeft, Minus, ZoomIn, ZoomOut, Maximize, FileSpreadsheet, FileIcon, RefreshCw, AlertTriangle, ExternalLink, Info, Database, Globe, Vote, ArrowLeftRight, ArrowUp, ArrowDown } from 'lucide-react';
 import { Meeting, Document, User } from '../types';
 import { USERS, getUserById } from '../data';
 import mammoth from 'mammoth';
@@ -655,6 +655,22 @@ export const LiveMeeting: React.FC<LiveMeetingProps> = ({ currentUser, meeting, 
     );
   };
 
+  const moveDocUp = (index: number) => {
+    if (index === 0) return;
+    const newDocs = [...attachedDocIds];
+    [newDocs[index - 1], newDocs[index]] = [newDocs[index], newDocs[index - 1]];
+    setAttachedDocIds(newDocs);
+    onUpdateMeeting({ ...meeting, documentIds: newDocs });
+  };
+
+  const moveDocDown = (index: number) => {
+    if (index === attachedDocIds.length - 1) return;
+    const newDocs = [...attachedDocIds];
+    [newDocs[index + 1], newDocs[index]] = [newDocs[index], newDocs[index + 1]];
+    setAttachedDocIds(newDocs);
+    onUpdateMeeting({ ...meeting, documentIds: newDocs });
+  };
+
   return (
     <div className="flex h-screen bg-slate-900 text-white overflow-hidden relative select-none">
       
@@ -798,13 +814,31 @@ export const LiveMeeting: React.FC<LiveMeetingProps> = ({ currentUser, meeting, 
 
                   {/* List Attached Docs */}
                   <div className="space-y-2">
-                     {getAttachedDocsResolved().map(doc => (
+                     {getAttachedDocsResolved().map((doc, index) => (
                         <div 
                            key={doc.id}
                            className={`bg-white p-3 rounded-xl border transition-all cursor-pointer group hover:shadow-md ${previewDoc?.id === doc.id ? 'border-emerald-500 ring-1 ring-emerald-500' : 'border-gray-200 hover:border-emerald-300'}`}
                            onClick={() => setPreviewDoc(doc)}
                         >
                            <div className="flex items-start gap-3">
+                              {isAdmin && (
+                                <div className="flex flex-col gap-1 mr-1" onClick={(e) => e.stopPropagation()}>
+                                   <button 
+                                     onClick={() => moveDocUp(index)} 
+                                     disabled={index === 0}
+                                     className="p-0.5 text-gray-400 hover:text-emerald-600 disabled:opacity-30"
+                                   >
+                                     <ArrowUp className="w-3 h-3" />
+                                   </button>
+                                   <button 
+                                     onClick={() => moveDocDown(index)} 
+                                     disabled={index === attachedDocIds.length - 1}
+                                     className="p-0.5 text-gray-400 hover:text-emerald-600 disabled:opacity-30"
+                                   >
+                                     <ArrowDown className="w-3 h-3" />
+                                   </button>
+                                </div>
+                              )}
                               <div className="p-2 bg-gray-50 rounded-lg shrink-0">
                                  {getDocIcon(doc.type)}
                               </div>

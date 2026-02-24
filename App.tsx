@@ -365,6 +365,12 @@ const App: React.FC = () => {
     if (error) console.error('Error updating room status:', error);
   };
 
+  const handleUpdateRoom = async (updatedRoom: Room) => {
+    setRooms(prev => prev.map(r => r.id === updatedRoom.id ? updatedRoom : r));
+    const { error } = await supabase.from('rooms').update(updatedRoom).eq('id', updatedRoom.id);
+    if (error) console.error('Error updating room:', error);
+  };
+
   // DOCUMENTS
   const handleAddDocument = async (newDoc: Document) => {
     setDocuments(prev => [newDoc, ...prev]);
@@ -489,7 +495,7 @@ const App: React.FC = () => {
       case 'dashboard':
         return <Dashboard currentUser={currentUser} onNavigate={handleNavigate} meetings={meetings} rooms={rooms} documents={documents} />;
       case 'rooms':
-        return <RoomList rooms={rooms} onAddRoom={handleAddRoom} onUpdateRoomStatus={handleUpdateRoomStatus} pendingAction={pendingAction} onActionComplete={handleActionComplete} onJoinRoom={handleJoinRoom} allDocuments={documents} />;
+        return <RoomList rooms={rooms} onAddRoom={handleAddRoom} onUpdateRoomStatus={handleUpdateRoomStatus} onUpdateRoom={handleUpdateRoom} pendingAction={pendingAction} onActionComplete={handleActionComplete} onJoinRoom={handleJoinRoom} allDocuments={documents} currentUser={currentUser} />;
       case 'meetings':
         return <MeetingList currentUser={currentUser} meetings={meetings} onAddMeeting={handleAddMeeting} onUpdateMeeting={handleUpdateMeeting} onDeleteMeeting={handleDeleteMeeting} pendingAction={pendingAction} onActionComplete={handleActionComplete} onJoinMeeting={handleJoinMeeting} allDocuments={documents} allRooms={rooms} allUsers={users} />;
       case 'documents':
