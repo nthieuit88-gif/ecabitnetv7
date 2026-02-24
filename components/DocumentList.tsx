@@ -101,20 +101,14 @@ export const DocumentList: React.FC<DocumentListProps> = ({
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setIsUploading(true);
-    setUploadWarning(null);
-
+  const processFile = async (file: File) => {
     try {
         const originalName = file.name;
         // Clean filename strictly to avoid URL encoding issues in viewers
         const cleanName = sanitizeFileName(originalName);
         
         // Use a random prefix to avoid collisions and cache issues
-        const filePath = `${Date.now()}_${cleanName}`;
+        const filePath = `${Date.now()}_${Math.random().toString(36).substr(2, 5)}_${cleanName}`;
         let publicUrl = '';
         
         // 1. Upload to Supabase
@@ -140,7 +134,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                 errorMsg = `Lỗi Quyền (RLS). Đã chuyển sang chế độ Local. Hãy chạy script 'supabase_setup.sql' mới nhất để sửa triệt để.`;
             }
             
-            setUploadWarning(`${errorMsg} File chỉ xem được trên máy của bạn.`);
+            setUploadWarning((prev) => prev ? `${prev} | ${file.name}: ${errorMsg}` : `${file.name}: ${errorMsg}`);
             
             // Fallback to local Blob URL (Only visible to uploader)
             publicUrl = URL.createObjectURL(file);
@@ -154,7 +148,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
         }
 
         // 2. Create Doc Record
-        const newDocId = Date.now().toString();
+        const newDocId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
         const newDoc: Document = {
             id: newDocId,
             name: originalName, // Display name can remain pretty
@@ -169,16 +163,37 @@ export const DocumentList: React.FC<DocumentListProps> = ({
         await saveFileToLocal(newDocId, file);
 
         onAddDocument(newDoc);
-        
+
+    } catch (error: any) {
+        console.error(`Unexpected error during upload of ${file.name}:`, error);
+        setUploadWarning((prev) => prev ? `${prev} | ${file.name}: Lỗi không xác định` : `${file.name}: Lỗi không xác định`);
+    }
+  };
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+
+    if (files.length > 5) {
+        alert("Vui lòng chỉ chọn tối đa 5 file cùng lúc.");
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        return;
+    }
+
+    setIsUploading(true);
+    setUploadWarning(null);
+
+    try {
+        const uploadPromises = Array.from(files).map(file => processFile(file));
+        await Promise.all(uploadPromises);
+    } catch (error: any) {
+        console.error("Batch upload error:", error);
+        alert(`Có lỗi xảy ra trong quá trình tải lên: ${error.message}`);
+    } finally {
+        setIsUploading(false);
         if (fileInputRef.current) {
             fileInputRef.current.value = '';
         }
-
-    } catch (error: any) {
-        console.error("Unexpected error during upload:", error);
-        alert(`Có lỗi xảy ra: ${error.message || "Không thể tải lên"}`);
-    } finally {
-        setIsUploading(false);
     }
   };
 
@@ -219,6 +234,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
               ref={fileInputRef} 
               className="hidden" 
               onChange={handleFileChange}
+              multiple
             />
 
             <button 

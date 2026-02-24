@@ -14,6 +14,7 @@ import { Meeting, Room, Document, User } from './types';
 import { supabase } from './supabaseClient';
 import { saveFileToLocal, getFileFromLocal } from './utils/indexedDB';
 import { AlertTriangle, LogOut } from 'lucide-react';
+import { MeetingBubble } from './components/MeetingBubble';
 import { 
   USERS as DEFAULT_USERS, 
   ROOMS as DEFAULT_ROOMS, 
@@ -518,6 +519,13 @@ const App: React.FC = () => {
            {renderContent()}
         </div>
         {activeTab !== 'live-meeting' && <BottomBanner />}
+        {activeTab !== 'live-meeting' && currentUser && (
+            <MeetingBubble 
+                meetings={meetings} 
+                onJoin={handleJoinMeeting} 
+                currentUserId={currentUser.id} 
+            />
+        )}
       </main>
     </div>
   );
