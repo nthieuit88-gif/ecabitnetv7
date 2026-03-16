@@ -108,7 +108,12 @@ export const DocumentList: React.FC<DocumentListProps> = ({
         const cleanName = sanitizeFileName(originalName);
         
         // Use a random prefix to avoid collisions and cache issues
-        const filePath = `${Date.now()}_${Math.random().toString(36).substr(2, 5)}_${cleanName}`;
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const folderPath = `${year}/${month}/${day}`;
+        const filePath = `${folderPath}/${Date.now()}_${Math.random().toString(36).substr(2, 5)}_${cleanName}`;
         let publicUrl = '';
         
         // 1. Upload to Supabase
@@ -156,7 +161,8 @@ export const DocumentList: React.FC<DocumentListProps> = ({
             size: formatFileSize(file.size),
             updatedAt: new Date().toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' }),
             ownerId: currentUser.id,
-            url: publicUrl // This is the crucial link for other users
+            url: publicUrl, // This is the crucial link for other users
+            path: folderPath // Save the folder path
         };
 
         // 3. IMPORTANT: Save to IndexedDB immediately for local speed
@@ -286,6 +292,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100 text-xs uppercase text-gray-500 font-semibold tracking-wider">
                 <th className="px-6 py-4">Tên Tài Liệu</th>
+                <th className="px-6 py-4">Thư mục</th>
                 <th className="px-6 py-4">Kích Thước</th>
                 <th className="px-6 py-4">Ngày Tải Lên</th>
                 <th className="px-6 py-4">Người Tải</th>
@@ -330,6 +337,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                         </div>
                       </div>
                     </td>
+                    <td className="px-6 py-4 text-sm text-gray-500">{doc.path || '/'}</td>
                     <td className="px-6 py-4 text-sm text-gray-500">{doc.size}</td>
                     <td className="px-6 py-4 text-sm text-gray-500">{doc.updatedAt}</td>
                     <td className="px-6 py-4">
