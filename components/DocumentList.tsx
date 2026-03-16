@@ -288,119 +288,127 @@ export const DocumentList: React.FC<DocumentListProps> = ({
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-100 text-xs uppercase text-gray-500 font-semibold tracking-wider">
-                <th className="px-6 py-4">Tên Tài Liệu</th>
-                <th className="px-6 py-4">Thư mục</th>
-                <th className="px-6 py-4">Kích Thước</th>
-                <th className="px-6 py-4">Ngày Tải Lên</th>
-                <th className="px-6 py-4">Người Tải</th>
-                <th className="px-6 py-4 text-right">Hành Động</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {documents.map((doc) => {
-                const owner = getUserById(doc.ownerId);
-                const isLocalBlob = doc.url && doc.url.startsWith('blob:');
-                const isSupabaseUrl = doc.url && !isLocalBlob;
-
-                return (
-                  <tr key={doc.id} className="hover:bg-gray-50 transition-colors group">
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-4">
-                        <div className="p-2 bg-gray-50 rounded-lg border border-gray-100 group-hover:bg-white group-hover:shadow-sm transition-all">
-                          {getFileIcon(doc.type)}
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                              <span className="font-medium text-sm block text-gray-800">{doc.name}</span>
-                              {isLocalBlob && <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded border border-red-200 font-bold" title="Lỗi: File chưa được tải lên Server. Chỉ xem được trên máy này.">Lỗi Sync</span>}
-                          </div>
-                          <div className="flex items-center gap-2 mt-0.5">
-                             <span className="text-xs text-gray-400 uppercase">{doc.type}</span>
-                             
-                             {/* URL Debugger Tools */}
-                             {isSupabaseUrl && (
-                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                   <div className="w-px h-3 bg-gray-300 mx-1"></div>
-                                   <button 
-                                      onClick={() => handleCopyUrl(doc.id, doc.url || '')}
-                                      className="p-1 text-gray-400 hover:text-blue-500 rounded"
-                                      title="Sao chép URL gốc"
-                                   >
-                                      {copiedId === doc.id ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
-                                   </button>
-                                </div>
-                             )}
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-500">{doc.path || '/'}</td>
-                    <td className="px-6 py-4 text-sm text-gray-500">{doc.size}</td>
-                    <td className="px-6 py-4 text-sm text-gray-500">{doc.updatedAt}</td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                         <div className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-600 border border-gray-300">
-                            {owner?.name.charAt(0) || '?'}
-                         </div>
-                         <span className="text-sm text-gray-700">{owner?.name || 'Unknown User'}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button 
-                             className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg"
-                             title="Đã lưu trong cache cục bộ (IndexedDB)"
-                        >
-                            <Database className="w-4 h-4" />
-                        </button>
-                        {doc.url && (
-                          <a 
-                            href={doc.url} 
-                            target="_blank"
-                            download={doc.name}
-                            className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg flex items-center justify-center" 
-                            title="Tải xuống"
-                          >
-                            <Download className="w-4 h-4" />
-                          </a>
-                        )}
-                        
-                        {isAdmin && (
-                          <>
-                            <button 
-                                className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" 
-                                title="Đổi tên"
-                                onClick={() => handleEdit(doc)}
-                            >
-                                <Edit className="w-4 h-4" />
-                            </button>
-                            <button 
-                                className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg" 
-                                title="Xóa"
-                                onClick={() => handleDelete(doc.id, doc.url)}
-                            >
-                                <Trash2 className="w-4 h-4" />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </td>
+          {Object.entries(documents.reduce((acc, doc) => {
+            const path = doc.path || '/';
+            if (!acc[path]) acc[path] = [];
+            acc[path].push(doc);
+            return acc;
+          }, {} as Record<string, Document[]>)).map(([path, docs]) => (
+            <div key={path} className="mb-6">
+              <div className="px-6 py-3 bg-gray-100 text-xs font-bold text-gray-600 uppercase tracking-wider border-b border-gray-200 flex items-center gap-2">
+                <Database className="w-4 h-4" /> Thư mục: {path}
+              </div>
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-100 text-xs uppercase text-gray-500 font-semibold tracking-wider">
+                    <th className="px-6 py-4">Tên Tài Liệu</th>
+                    <th className="px-6 py-4">Kích Thước</th>
+                    <th className="px-6 py-4">Ngày Tải Lên</th>
+                    <th className="px-6 py-4">Người Tải</th>
+                    <th className="px-6 py-4 text-right">Hành Động</th>
                   </tr>
-                );
-              })}
-              {documents.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-gray-400">
-                    <UploadCloud className="w-12 h-12 mx-auto mb-3 opacity-20" />
-                    <p>Chưa có tài liệu nào. {isAdmin && "Hãy tải lên ngay!"}</p>
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {docs.map((doc) => {
+                    const owner = getUserById(doc.ownerId);
+                    const isLocalBlob = doc.url && doc.url.startsWith('blob:');
+                    const isSupabaseUrl = doc.url && !isLocalBlob;
+    
+                    return (
+                      <tr key={doc.id} className="hover:bg-gray-50 transition-colors group">
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-4">
+                            <div className="p-2 bg-gray-50 rounded-lg border border-gray-100 group-hover:bg-white group-hover:shadow-sm transition-all">
+                              {getFileIcon(doc.type)}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                  <span className="font-medium text-sm block text-gray-800">{doc.name}</span>
+                                  {isLocalBlob && <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded border border-red-200 font-bold" title="Lỗi: File chưa được tải lên Server. Chỉ xem được trên máy này.">Lỗi Sync</span>}
+                              </div>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                 <span className="text-xs text-gray-400 uppercase">{doc.type}</span>
+                                 
+                                 {/* URL Debugger Tools */}
+                                 {isSupabaseUrl && (
+                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                       <div className="w-px h-3 bg-gray-300 mx-1"></div>
+                                       <button 
+                                          onClick={() => handleCopyUrl(doc.id, doc.url || '')}
+                                          className="p-1 text-gray-400 hover:text-blue-500 rounded"
+                                          title="Sao chép URL gốc"
+                                       >
+                                          {copiedId === doc.id ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                                       </button>
+                                    </div>
+                                 )}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-500">{doc.size}</td>
+                        <td className="px-6 py-4 text-sm text-gray-500">{doc.updatedAt}</td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-2">
+                             <div className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-600 border border-gray-300">
+                                {owner?.name.charAt(0) || '?'}
+                             </div>
+                             <span className="text-sm text-gray-700">{owner?.name || 'Unknown User'}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button 
+                                 className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg"
+                                 title="Đã lưu trong cache cục bộ (IndexedDB)"
+                            >
+                                <Database className="w-4 h-4" />
+                            </button>
+                            {doc.url && (
+                              <a 
+                                href={doc.url} 
+                                target="_blank"
+                                download={doc.name}
+                                className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg flex items-center justify-center" 
+                                title="Tải xuống"
+                              >
+                                <Download className="w-4 h-4" />
+                              </a>
+                            )}
+                            
+                            {isAdmin && (
+                              <>
+                                <button 
+                                    className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" 
+                                    title="Đổi tên"
+                                    onClick={() => handleEdit(doc)}
+                                >
+                                    <Edit className="w-4 h-4" />
+                                </button>
+                                <button 
+                                    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg" 
+                                    title="Xóa"
+                                    onClick={() => handleDelete(doc.id, doc.url)}
+                                >
+                                    <Trash2 className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ))}
+          {documents.length === 0 && (
+            <div className="px-6 py-12 text-center text-gray-400">
+              <UploadCloud className="w-12 h-12 mx-auto mb-3 opacity-20" />
+              <p>Chưa có tài liệu nào. {isAdmin && "Hãy tải lên ngay!"}</p>
+            </div>
+          )}
         </div>
       </div>
     </div>
