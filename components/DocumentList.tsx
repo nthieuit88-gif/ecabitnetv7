@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { FileText, FileSpreadsheet, FileIcon, Download, Trash2, Search, UploadCloud, Filter, Loader2, Edit, AlertCircle, Database, Link2, Copy, Check, ExternalLink, Globe } from 'lucide-react';
+import { FileText, FileSpreadsheet, FileIcon, Download, Trash2, Search, UploadCloud, Filter, Loader2, Edit, AlertCircle, Database, Link2, Copy, Check, ExternalLink, Globe, FolderUp, FolderPlus } from 'lucide-react';
 import { getUserById } from '../data';
 import { Document, User } from '../types';
 import { supabase } from '../supabaseClient';
@@ -63,6 +63,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
 }) => {
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
   const isAdmin = currentUser.role === 'admin';
   const [uploadWarning, setUploadWarning] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -83,6 +84,28 @@ export const DocumentList: React.FC<DocumentListProps> = ({
   const handleUploadClick = () => {
     setUploadWarning(null);
     fileInputRef.current?.click();
+  };
+
+  const handleFolderUploadClick = () => {
+    setUploadWarning(null);
+    folderInputRef.current?.click();
+  };
+
+  const handleCreateFolder = () => {
+    const today = new Date().toISOString().split('T')[0].replace(/-/g, '/');
+    const folderName = window.prompt("Nhập tên thư mục (YYYY/MM/DD):", today);
+    if (folderName) {
+      const newFolderDoc: Document = {
+        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+        name: folderName,
+        type: 'other',
+        size: '0 MB',
+        updatedAt: new Date().toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+        ownerId: currentUser.id,
+        path: folderName
+      };
+      onAddDocument(newFolderDoc);
+    }
   };
 
   const handleEdit = async (doc: Document) => {
@@ -112,7 +135,16 @@ export const DocumentList: React.FC<DocumentListProps> = ({
         const year = now.getFullYear();
         const month = String(now.getMonth() + 1).padStart(2, '0');
         const day = String(now.getDate()).padStart(2, '0');
-        const folderPath = `${year}/${month}/${day}`;
+        const dateFolder = `${year}/${month}/${day}`;
+        
+        let relativePath = '';
+        if (file.webkitRelativePath) {
+            const parts = file.webkitRelativePath.split('/');
+            parts.pop(); // Remove the file name
+            relativePath = parts.join('/');
+        }
+        
+        const folderPath = relativePath ? relativePath : dateFolder;
         const filePath = `${folderPath}/${Date.now()}_${Math.random().toString(36).substr(2, 5)}_${cleanName}`;
         let publicUrl = '';
         
@@ -180,9 +212,10 @@ export const DocumentList: React.FC<DocumentListProps> = ({
     const files = event.target.files;
     if (!files || files.length === 0) return;
 
-    if (files.length > 5) {
-        alert("Vui lòng chỉ chọn tối đa 5 file cùng lúc.");
+    if (files.length > 50) {
+        alert("Vui lòng chỉ chọn tối đa 50 file cùng lúc để đảm bảo hiệu suất.");
         if (fileInputRef.current) fileInputRef.current.value = '';
+        if (folderInputRef.current) folderInputRef.current.value = '';
         return;
     }
 
@@ -199,6 +232,9 @@ export const DocumentList: React.FC<DocumentListProps> = ({
         setIsUploading(false);
         if (fileInputRef.current) {
             fileInputRef.current.value = '';
+        }
+        if (folderInputRef.current) {
+            folderInputRef.current.value = '';
         }
     }
   };
@@ -234,12 +270,20 @@ export const DocumentList: React.FC<DocumentListProps> = ({
         </div>
         
         {isAdmin && (
-          <>
+          <div className="flex gap-3">
             <input 
               type="file" 
               ref={fileInputRef} 
               className="hidden" 
               onChange={handleFileChange}
+              multiple
+            />
+            <input 
+              type="file" 
+              ref={folderInputRef} 
+              className="hidden" 
+              onChange={handleFileChange}
+              {...{ webkitdirectory: "true", directory: "true" } as any}
               multiple
             />
 
@@ -251,16 +295,42 @@ export const DocumentList: React.FC<DocumentListProps> = ({
               {isUploading ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  Đang tải lên...
+                  Đang tải...
                 </>
               ) : (
                 <>
                   <UploadCloud className="w-4 h-4" />
-                  Tải Lên
+                  Tải File
                 </>
               )}
             </button>
-          </>
+
+            <button 
+              onClick={handleFolderUploadClick}
+              disabled={isUploading}
+              className={`bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-colors shadow-sm shadow-blue-200 ${isUploading ? 'opacity-70 cursor-wait' : ''}`}
+            >
+              {isUploading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Đang tải...
+                </>
+              ) : (
+                <>
+                  <FolderUp className="w-4 h-4" />
+                  Tải Thư Mục
+                </>
+              )}
+            </button>
+
+            <button 
+              onClick={handleCreateFolder}
+              className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-colors shadow-sm shadow-emerald-200"
+            >
+              <FolderPlus className="w-4 h-4" />
+              Tạo Thư Mục
+            </button>
+          </div>
         )}
       </div>
 
