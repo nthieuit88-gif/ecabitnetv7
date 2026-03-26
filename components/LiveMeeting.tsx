@@ -616,8 +616,11 @@ export const LiveMeeting: React.FC<LiveMeetingProps> = ({ currentUser, meeting, 
     // 5. Local Docx (High Fidelity using docx-preview)
     if (viewerType === 'local-docx') {
         return (
-            <div className="bg-slate-200 text-slate-900 w-full h-full shadow-none overflow-y-auto">
-               <div ref={docxContainerRef} className="w-full min-h-full"></div>
+            <div className="bg-slate-200 text-slate-900 w-full h-full shadow-none overflow-y-auto p-4 md:p-8">
+               <div 
+                 ref={docxContainerRef} 
+                 className="w-full max-w-4xl mx-auto bg-white shadow-lg p-8 md:p-16 min-h-full docx-container"
+               />
             </div>
         );
     }
