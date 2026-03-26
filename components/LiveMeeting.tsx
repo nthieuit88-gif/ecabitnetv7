@@ -377,6 +377,10 @@ export const LiveMeeting: React.FC<LiveMeetingProps> = ({ currentUser, meeting, 
           canvas.style.width = `${viewport.width / pixelRatio}px`;
           canvas.style.height = `${viewport.height / pixelRatio}px`;
 
+          // Fill background with white
+          context.fillStyle = 'white';
+          context.fillRect(0, 0, canvas.width, canvas.height);
+
           const renderContext = {
             canvasContext: context,
             viewport: viewport,

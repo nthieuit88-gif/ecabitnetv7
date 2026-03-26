@@ -48,11 +48,14 @@
 .docx-container .docx-wrapper {
   padding: 0 !important;
   margin: 0 !important;
-  background: transparent !important;
+  background: #ffffff !important; /* Force white background */
+  color: #000000 !important; /* Force black text */
 }
 
 .docx-container section {
   margin: 0 !important;
   padding: 0 !important;
   text-align: justify !important;
+  background: #ffffff !important; /* Force white background */
+  color: #000000 !important; /* Force black text */
 }
